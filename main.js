@@ -96,47 +96,7 @@ const glados = async () => {
         pointsSummary.push(`账号${accountNo}: 查询失败`)
       }
 
-      // ========== 4. 积分自动兑换（满500积分自动消耗500积分兑换100天） ==========
-      // 开关：AUTO_EXCHANGE，默认开启；设为 false 可关闭
-      // 阈值：EXCHANGE_THRESHOLD，默认 500
-      const autoExchange = String(process.env.AUTO_EXCHANGE || 'true').toLowerCase() !== 'false'
-      const exchangeThreshold = Number(process.env.EXCHANGE_THRESHOLD || 500)
-      if (autoExchange && currentPoints != null && currentPoints >= exchangeThreshold) {
-        try {
-          console.log(`[账号 ${accountNo}] 积分 ${currentPoints} ≥ ${exchangeThreshold}，自动兑换 100 天...`)
-          const exRes = await fetch(`https://${domain}/api/user/exchange`, {
-            method: 'POST',
-            headers: { ...common, 'content-type': 'application/json' },
-            body: JSON.stringify({ planType: 'plan500' }),
-          })
-          if (!exRes.ok) {
-            throw new Error(`兑换接口HTTP错误: ${exRes.status} ${exRes.statusText}`)
-          }
-          const ex = await exRes.json()
-          console.log(`[账号 ${accountNo}] 兑换接口响应码: ${ex?.code ?? '无'}`)
-          if (ex?.code !== 0) {
-            throw new Error(`${ex?.message || '兑换失败'} (code=${ex?.code})`)
-          }
-          const remain = Number(ex?.points) || 0
-          console.log(`[账号 ${accountNo}] ✅ 自动兑换成功，消耗500积分，剩余积分: ${remain}`)
-          notice.push(
-            `【账号${accountNo}】自动兑换成功`,
-            `兑换结果: ${ex?.message || '消耗500积分兑换100天'}`,
-            `剩余积分: ${remain}`
-          )
-        } catch (exErr) {
-          // 兑换异常不影响签到结果，单独记录
-          console.error(`[账号 ${accountNo}] ⚠️ 自动兑换异常（不影响签到结果）`)
-          console.error(`[账号 ${accountNo}] 错误详情: ${exErr.message}`)
-          notice.push(
-            `【账号${accountNo}】自动兑换失败`,
-            `错误: ${exErr.message}`
-          )
-        }
-      } else if (autoExchange) {
-        console.log(`[账号 ${accountNo}] 积分 ${currentPoints ?? '未知'} 未达到 ${exchangeThreshold}，本次不兑换`)
-      }
-      // ========== 新增部分结束 ==========
+      // 已移除「满 500 积分自动兑换天数」逻辑：不再请求 /api/user/exchange，积分只查询展示、不会被自动消耗
 
       console.log(`[账号 ${accountNo}] ✅ ${alreadyCheckedIn ? '今日已签到过' : '签到成功'}`)
       console.log(`[账号 ${accountNo}] 返回消息: ${action?.message || (alreadyCheckedIn ? '今日已签到过' : '')}`)
