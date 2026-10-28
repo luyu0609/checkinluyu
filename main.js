@@ -9,11 +9,12 @@ const mask = (str, startLen = 4, endLen = 4) => {
 const glados = async () => {
   const notice = []
   const pointsSummary = [] // 用于最终汇总各账号积分
+  let failedAccounts = 0 // 签到失败的账号数，供 main() 判断是否让 Actions 变红
   console.log('========== GLaDOS 签到任务开始 ==========')
   // 环境变量检测
   if (!process.env.GLADOS) {
     console.log('⚠️  未配置 GLADOS 环境变量，跳过签到任务')
-    return notice
+    return { notice, failedAccounts, totalAccounts: 0 }
   }
   const agents = String(process.env.GLADOS_UA || '').split('\n').filter(Boolean)
   const cookies = String(process.env.GLADOS).split('\n').filter(Boolean)
@@ -109,19 +110,25 @@ const glados = async () => {
         `当前积分: ${currentPoints != null ? currentPoints + ' 点' : '查询失败'}`
       )
     } catch (error) {
+      failedAccounts++
       console.error(`[账号 ${accountNo}] ❌ 签到失败`)
       console.error(`[账号 ${accountNo}] 错误详情: ${error.message}`)
-      
+      // code=-2 表示服务端不认这个会话（cookie 过期或被踢下线），给出可直接照做的修复指引
+      const isAuthError = /code=-2\b/.test(error.message)
+      if (isAuthError) {
+        console.error(`[账号 ${accountNo}] 👉 Cookie 已失效：请重新登录 GLaDOS，导出新的 cookie 更新 Secret GLADOS`)
+      }
       notice.push(
         `【账号${accountNo}】签到失败`,
         `错误: ${error.message}`,
+        ...(isAuthError ? ['Cookie 已失效，请重新登录 GLaDOS 并更新 Secret GLADOS'] : []),
         `仓库地址: <${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}>`
       )
     }
   }
   // 汇总统计
-  const successCount = notice.filter(n => n.includes('签到成功')).length
-  const failCount = notice.filter(n => n.includes('签到失败')).length
+  const totalAccounts = cookies.length
+  const successCount = totalAccounts - failedAccounts
   console.log('\n========== 各账号当前积分 ==========')
   if (pointsSummary.length) {
     pointsSummary.forEach(line => console.log(`📊 ${line}`))
@@ -130,8 +137,8 @@ const glados = async () => {
   }
   console.log('===================================')
   console.log('\n========== 签到任务处理完成 ==========')
-  console.log(`📊 统计结果：成功 ${successCount} 个 | 失败 ${failCount} 个`)
-  return notice
+  console.log(`📊 统计结果：成功 ${successCount} 个 | 失败 ${failedAccounts} 个`)
+  return { notice, failedAccounts, totalAccounts }
 }
 // ========== 通知推送模块 ==========
 const notify = async (notice) => {
@@ -281,9 +288,18 @@ const notify = async (notice) => {
 }
 // ========== 主入口 ==========
 const main = async () => {
-  const notice = await glados()
-  await notify(notice)
-  console.log('\n🎉 全部任务执行完毕')
+  const { notice, failedAccounts, totalAccounts } = await glados()
+  await notify(notice) // 先推送，保证失败信息送达后再落状态
+  // 用 exitCode 而不是 process.exit，避免推送与日志被截断
+  if (totalAccounts === 0) {
+    console.error('\n❌ 没有可用账号：请检查 Secret GLADOS 是否配置（当前 GLADOS 为空）')
+    process.exitCode = 1
+  } else if (failedAccounts > 0) {
+    console.error(`\n❌ 有 ${failedAccounts}/${totalAccounts} 个账号签到失败，任务标记为失败`)
+    process.exitCode = 1
+  } else {
+    console.log('\n🎉 全部任务执行完毕')
+  }
 }
 // 全局错误捕获，避免程序静默失败
 main().catch(err => {
