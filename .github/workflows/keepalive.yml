@@ -2,7 +2,10 @@ name: Keep GitHub Actions Active
 
 on:
   schedule:
-    - cron: "0 1 1 * *"   # 每月1号 UTC 01:00 自动执行
+    # 每周一 UTC 03:37（北京 11:37）。刻意避开整点：GitHub 在每个整点负载最高，
+    # 排队中的 schedule 任务可能被直接丢弃。每周检查一次，即使某一周被丢，
+    # 也不会逼近"60 天无活动即禁用"的红线。
+    - cron: "37 3 * * 1"
   workflow_dispatch:      # 可以手动执行一次
 
 permissions:
@@ -11,20 +14,29 @@ permissions:
 jobs:
   keepalive:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Update keepalive timestamp
+      - name: 仅在确实长时间无提交时补一次提交
+        env:
+          THRESHOLD: 30
         run: |
+          set -eu
+          last=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          days=$(( (now - last) / 86400 ))
+          echo "最近一次提交距今 ${days} 天（阈值 ${THRESHOLD} 天）"
+          if [ "$days" -lt "${THRESHOLD}" ]; then
+            echo "未超过阈值，跳过：仓库本身已有活动"
+            exit 0
+          fi
           mkdir -p .github
           echo "Last keepalive: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" > .github/keepalive.txt
-
-      - name: Commit and push changes
-        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/keepalive.txt
-          git commit -m "chore: keep actions active" || exit 0
+          git commit -m "chore: keepalive（${days} 天无提交，重置 60 天计时器）"
           git push
