@@ -5,6 +5,8 @@ const mask = (str, startLen = 4, endLen = 4) => {
   if (str.length <= startLen + endLen) return '*'.repeat(str.length)
   return str.slice(0, startLen) + '****' + str.slice(-endLen)
 }
+// 单次请求超时：避免网络卡住时整个 job 挂到默认的 6 小时
+const REQUEST_TIMEOUT = 30000
 // ========== GLaDOS 签到核心逻辑 ==========
 const glados = async () => {
   const notice = []
@@ -16,10 +18,16 @@ const glados = async () => {
     console.log('⚠️  未配置 GLADOS 环境变量，跳过签到任务')
     return { notice, failedAccounts, totalAccounts: 0 }
   }
-  const agents = String(process.env.GLADOS_UA || '').split('\n').filter(Boolean)
-  const cookies = String(process.env.GLADOS).split('\n').filter(Boolean)
+  // Secret 在 Windows 上粘贴可能带 \r 或首尾空格，这里一并清掉：
+  // 带着 \r 的 cookie 会被塞进请求头，服务端直接判成没有权限（code=-2），且日志里完全看不出来
+  const splitLines = (v) => String(v || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+  const agents = splitLines(process.env.GLADOS_UA)
+  const cookies = splitLines(process.env.GLADOS)
   console.log(`📋 共检测到 ${cookies.length} 个账号`)
   console.log(`📋 自定义 UA 数量: ${agents.length}${agents.length < cookies.length ? '（不足时将使用默认UA）' : ''}`)
+  if (agents.length === 0) {
+    console.warn('⚠️  未配置 GLADOS_UA：将回落到内置 macOS UA，若登录设备是 Windows 会触发 device-mismatch（积分被扣下并收到安全邮件）')
+  }
   for (const [index, cookie] of cookies.entries()) {
     const accountNo = index + 1
     console.log(`\n[账号 ${accountNo}] ---------- 开始处理 ----------`)
@@ -41,6 +49,7 @@ const glados = async () => {
         method: 'POST',
         headers: { ...common, 'content-type': 'application/json' },
         body: JSON.stringify({ token: domain }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
       })
       // HTTP 层错误捕获（网络错误、404、500等）
       if (!checkinRes.ok) {
@@ -61,6 +70,7 @@ const glados = async () => {
       const statusRes = await fetch(`https://${domain}/api/user/status`, {
         method: 'GET',
         headers: { ...common },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT),
       })
       if (!statusRes.ok) {
         throw new Error(`状态接口HTTP错误: ${statusRes.status} ${statusRes.statusText}`)
@@ -80,6 +90,7 @@ const glados = async () => {
         const pointsRes = await fetch(`https://${domain}/api/user/points`, {
           method: 'GET',
           headers: { ...common },
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT),
         })
         if (!pointsRes.ok) {
           throw new Error(`积分接口HTTP错误: ${pointsRes.status} ${pointsRes.statusText}`)
